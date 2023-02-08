@@ -11,8 +11,6 @@
 #### additional resources used in manuscript: 
 - MAD2 for simulations and alignment: https://github.com/gencorefacility/MAD2
 - timo: https://github.com/GhedinLab/timo/blob/main/timo.v3.py
-- sars-cov-2 snakemake
-
 
 ## Reference
 _In preparation_
