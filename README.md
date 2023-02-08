@@ -11,6 +11,7 @@
 #### additional resources used in manuscript: 
 - MAD2 for simulations and alignment: https://github.com/gencorefacility/MAD2
 - timo: https://github.com/GhedinLab/timo/blob/main/timo.v3.py
+- sars-cov-2 analysis: https://github.com/GhedinSGS/SARS-CoV-2_analysis
 
 ## Reference
 _In preparation_
