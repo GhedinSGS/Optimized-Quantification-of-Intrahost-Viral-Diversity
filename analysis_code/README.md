@@ -17,6 +17,10 @@ Notebooks (ipynb or rmd) and their corresponding figures are as follows:
 #### Fig1b.ipynb:
 - Figures: 1B
 
+#### Fig3B_S5C.Rmd:
+- Figures: 3B
+- Supp. Figures: 5C
+
 #### Fig5.ipynb: 
 - Figures: 5A, 5B, 5C, 5D, 5E
 
