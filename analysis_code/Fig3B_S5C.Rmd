@@ -1,0 +1,277 @@
+---
+title: "Reanalysis of snythetic influenza data"
+output: html_notebook
+---
+
+Reanalysis of Bessie's synthetic influenza data to address reviewer comments.
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  root.dir = 'relative_path_to_root_from_Rmd'
+)
+```
+
+```{r}
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+library(vivaldi)
+library(glue)
+```
+
+```{r}
+PlotTheme1 = theme_bw() +
+              theme(legend.key = element_blank(),
+                strip.background = element_rect(colour="black", fill="white"),
+                axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+```
+
+```{r}
+tools = c("freebayes","hc","ivar","lofreq","mutect2","timo","varscan")
+toolsColors = c("#CC2F42","#35B6E9","#009E73","#F9BECD","#F0E442","#CCD2EB","#9B9E9A")
+names(toolsColors) = tools
+ToolscolScale_fill <- scale_fill_manual(name = "grp",values = toolsColors)
+ToolscolScale <- scale_colour_manual(name = "grp",values = toolsColors)
+```
+
+```{r}
+cov = read.csv("/Users/marissaknoll/Desktop/MAF/Syn_Data/cov_data.csv", header = T)
+cov$segment = factor(cov$segment, levels = c("Syn_PB2","Syn_HA","Syn_NA"))
+```
+
+```{r}
+cov = group_by(cov, segment,ntpos) %>%
+  mutate(mean_cov = mean(totalcount)) %>%
+  mutate(med_cov = median(totalcount))
+
+ggplot(cov, aes(x = ntpos, y = mean_cov)) +
+  geom_line() +
+  facet_grid(~segment)
+
+ggplot(cov, aes(x = ntpos, y = med_cov)) +
+  geom_line() +
+  facet_grid(~segment)
+```
+
+```{r}
+af_report = "/Users/marissaknoll/Desktop/MAF/Syn_Data/flu.synthetic.afdata.csv"
+af = read.csv(af_report,header = T)
+
+library("stringr")
+
+remove_mix = c("Mix37", "Mix38", "Mix39", "Mix40", "Mix41", "Mix42", "Mix44")
+
+af$MIX = str_extract(string = af$source_ID, pattern = "Mix[0-9]+")
+
+levels(factor((af %>% filter(MIX %in% remove_mix))$sample))
+
+sample_remove= c('0.0039_10^3_rep2',
+                  '0.0078_10^3_rep2',
+                  '0.0156_10^3_rep2',
+                  '0.0313_10^3_rep2',
+                  '0.0625_10^7_rep1',
+                  '0.25_10^7_rep1',
+                  '0.5_10^7_rep1')
+```
+
+```{r}
+af = af %>% filter( !sample %in% sample_remove &
+                    !MIX %in% remove_mix & 
+                   copy_number != '10^7' &
+                   cat != "pre") #%>%  
+        #select(-source_ID, -MIX) %>% unique() 
+```
+
+```{r}
+dil = read.csv("/Users/marissaknoll/Desktop/MAF/Syn_Data/dilution_factor.csv", header = T)
+dil$dilution_factor = factor(dil$dilution_factor, levels = c("1:2","1:4","1:8","1:16","1:32","1:64","1:128","1:256"))
+af = merge(af,dil)
+```
+
+```{r}
+ggplot(af, aes(x = cat, fill = tool)) +
+  geom_bar(position = "dodge") +
+  facet_grid(~segment)
+
+ggplot(filter(af, cat == "FP"), aes(x = segment)) +
+  geom_bar(aes(fill = tool)) +
+  #facet_grid(~dilution_factor) +
+  PlotTheme1
+```
+
+Coefficient of variation measurement
+```{r}
+af_cv = filter(af, cat == "TP" ) %>%
+  group_by(expected_freq,dilution_factor,segment,copy_number,tool,Rep) %>%
+  mutate(mean = mean(varfreq)) %>%
+  mutate(sd = sd(varfreq)) %>%
+  mutate(cv = (sd/mean)*100)
+
+ggplot(af_cv, aes(x = mean, y = cv, color = tool)) +
+  geom_point() +
+  facet_grid(segment~copy_number) +
+  PlotTheme1
+
+ggplot(filter(af_cv,), aes(x = mean, y = varfreq, color = tool)) +
+  geom_point() +
+  facet_grid(segment~copy_number) +
+  PlotTheme1
+
+# There is one variant on HA at ntpos == 4 and on PB2 at ntpos == 2280 that are routinely called waaaay below what they should be by all tools
+# Only PB2 has a variant at ntpos == 2280 and only HA has a variant at ntpos == 4, so just filtering out the position won't affect other segments
+
+af_cv2 = filter(af, cat == "TP" | cat == "FN") %>%
+  group_by(expected_freq,dilution_factor,segment,copy_number,tool,Rep) %>%
+  mutate(mean = mean(varfreq)) %>%
+  mutate(sd = sd(varfreq)) %>%
+  mutate(cv = (sd/mean)*100)
+
+```
+
+Using TP and FN after merging replicates
+```{r}
+af_rep1 = filter(af, Rep == "rep1")
+af_rep2 = filter(af, Rep == "rep2")
+
+af_merge = merge(af_rep1,af_rep2, by = c("tool","expected_freq","dilution_factor","copy_number","segment","ntpos",
+                                         "refnt","varnt","golden_REF","golden_ALT","cat"))
+
+af_merge$varfreq.x[is.na(af_merge$varfreq.x)] = 0
+af_merge$varfreq.y[is.na(af_merge$varfreq.y)] = 0
+
+af_merge = mutate(af_merge, avg_varfreq = (varfreq.x + varfreq.y) / 2)
+
+af_merge_cv_TP = filter(af_merge, cat == "TP") %>%
+  group_by(expected_freq,dilution_factor,segment,copy_number,tool) %>%
+  mutate(mean = mean(avg_varfreq)) %>%
+  mutate(sd = sd(avg_varfreq)) %>%
+  mutate(cv = (sd/mean)*100)
+
+af_merge_cv_TPFN = filter(af_merge, cat == "TP" | cat == "FN") %>%
+  group_by(expected_freq,dilution_factor,segment,copy_number,tool) %>%
+  mutate(mean = mean(avg_varfreq)) %>%
+  mutate(sd = sd(avg_varfreq)) %>%
+  mutate(cv = (sd/mean)*100)
+```
+
+```{r}
+#midpoints: PB2 = 1140, HA = 850, NA = 700
+af_merge_cv_TPFN$segment = factor(af_merge_cv_TPFN$segment, levels = c("Syn_PB2","Syn_HA","Syn_NA"))
+
+p1 = ggplot(filter(af_merge_cv_TPFN, segment == "Syn_PB2", copy_number != "10^3"), aes(x = mean, y = avg_varfreq,color = ntpos)) +
+  geom_point(size = 2, alpha = 0.8) +
+  facet_grid(segment~copy_number) +
+  ylab("allele frequency") +
+  xlab("mean allele frequency") +
+  PlotTheme1 +
+  scale_colour_gradient2(low = "lightblue", mid = "darkblue", high = "lightblue", midpoint = 1140) # make monochrome blue
+print(p1)
+ggsave("Varfreq_PB2_plot.pdf",p1,width = 13, height = 5, useDingbats = FALSE)
+```
+
+```{r}
+cv_mean_plot_TP = ggplot(filter(af_merge_cv_TP, copy_number != "10^3"), aes(x = mean, y = cv, color = tool)) +
+  geom_point(size = 2,alpha = 0.8) +
+  geom_vline(xintercept = 0.01, linetype = "dotted") +
+  facet_grid(~copy_number) +
+  PlotTheme1 +
+  ToolscolScale
+print(cv_mean_plot_TP)
+ggsave("cv_mean_plot_TP_withreps.pdf",cv_mean_plot_TP, width = 6, height = 5, useDingbats = FALSE)
+
+cv_mean_plot_TPFN = ggplot(filter(af_merge_cv_TPFN, copy_number != "10^3"), aes(x = mean, y = cv, color = tool)) +
+  geom_point(size = 2, alpha = 0.8) +
+  facet_grid(~copy_number) +
+  PlotTheme1 +
+  ToolscolScale +
+  xlab("mean allele frequency") +
+  ylab("coefficient of variation") #+
+  #ylim(0,150)
+print(cv_mean_plot_TPFN)
+ggsave("cv_mean_plot_TPFN_withreps.pdf",cv_mean_plot_TPFN, width = 13, height = 5, useDingbats = FALSE)
+```
+
+Remaking this plot but only with variants shared among all tools
+```{r}
+af_merge_cv_TP = filter(af_merge, cat == "TP") %>%
+  group_by(segment,ntpos,copy_number,dilution_factor) %>%
+  mutate(count = 1, 
+         totalsamp = sum(count))
+nrow(af_merge_cv_TP)
+
+all_tools = filter(af_merge_cv_TP, totalsamp == 7)
+nrow(all_tools)
+
+nrow(af_merge_cv_TP) - nrow(all_tools)
+```
+
+```{r}
+all_tools = group_by(all_tools,expected_freq,dilution_factor,segment,copy_number,tool) %>%
+  mutate(mean = mean(avg_varfreq)) %>%
+  mutate(sd = sd(avg_varfreq)) %>%
+  mutate(cv = (sd/mean)*100)
+```
+
+```{r}
+all_tools_plot = ggplot(filter(all_tools, copy_number != "10^3"), aes(x = mean, y = cv, color = tool, shape = segment)) +
+  geom_point(size = 2, alpha = 0.8) +
+  facet_grid(~copy_number) +
+  PlotTheme1 +
+  ToolscolScale +
+  xlab("mean allele frequency") +
+  ylab("coefficient of variation") +
+  ggtitle("copy number (influenza A synthetic data)")
+print(all_tools_plot)
+ggsave("cv_all_tools.pdf",all_tools_plot, width = 13, height = 5, useDingbats = FALSE)
+```
+
+Pulling coverage information for commonly missed variants
+```{r}
+af_merge_FN = filter(af_merge, cat == "FN") 
+
+af_merge_FN_common = af_merge_FN %>%
+  group_by(segment, ntpos) %>%
+  tally()
+```
+
+Differences in coverage for variants with poor accuracy?
+```{r}
+names = read.csv("nameswitch.csv", header = TRUE)
+
+cov1 = separate(cov, name, into = c("name",NA), sep = ".fas_")
+cov1 = merge(cov1,names, by.x = c("name"), by.y = "filename")
+cov1$coverage = cov1$totalcount
+
+cov1 = cov1[!duplicated(cov1), ] %>% droplevels() %>% 
+  select(!c(Copy_number, Expected_freq,Rep,totalcount))
+
+```
+
+```{r}
+cov_vars = merge(af,cov1, by = c("sample","segment","ntpos"))
+cov_vars$var = paste0(cov_vars$segment,"_",cov_vars$ntpos)
+
+common_FN = c("Syn_PB2_2137","Syn_PB2_2280","Syn_PB2_2266","Syn_PB2_2267",
+              "Syn_HA_4","Syn_HA_515","Syn_HA_516",
+              "Syn_NA_282","Syn_NA_283","Syn_NA_284")
+random_FN = c("Syn_PB2_222","Syn_PB2_1167","Syn_PB2_711","Syn_PB2_546","Syn_PB2_1577","Syn_PB2_2055",
+              "Syn_HA_621","Syn_HA_1408","Syn_HA_1012","Syn_HA_1672","Syn_HA_1563","Syn_HA_930",
+              "Syn_HA_1173","Syn_HA_831","Syn_HA_298","Syn_HA_333","Syn_HA_796",
+              "Syn_NA_42")
+
+commons = filter(cov_vars,var %in% common_FN) %>% mutate(FNrate = "common")
+randoms = filter(cov_vars,var %in% random_FN) %>% mutate(FNrate = "random")
+
+FN_comp = rbind(commons,randoms)
+FN_comp$label = paste0(FN_comp$cat,"_",FN_comp$FNrate)
+
+FN_comp = FN_comp %>% select(sample,segment, ntpos, coverage, cat, label) %>% unique()
+```
+
+```{r}
+ggplot(FN_comp, aes(x = label, y = log10(coverage), color = cat)) +
+  geom_boxplot() +
+  geom_jitter()
+```
